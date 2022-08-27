@@ -103,7 +103,7 @@ func Install(bot *say.Bot) error {
 
 		settings, err := mod.Bot.GetUser(message.Author.ID)
 		if err != nil {
-			log.Print("error getting settings for user:", err)
+			log.Printf("error getting settings for user: %s", err)
 			return
 		}
 
@@ -357,7 +357,7 @@ func (command voiceCommand) Handle(bot *say.Bot, interaction *discordgo.Interact
 	settings, err := bot.GetUser(user.ID)
 
 	if err != nil {
-		log.Print("error getting settings for user:", err)
+		log.Printf("error getting settings for user: %s", err)
 		return
 	}
 
@@ -422,7 +422,7 @@ func (command prefixCommand) Handle(bot *say.Bot, interaction *discordgo.Interac
 	settings, err := bot.GetUser(user.ID)
 
 	if err != nil {
-		log.Print("error getting settings for user:", err)
+		log.Printf("error getting settings for user: %s", err)
 		return
 	}
 
