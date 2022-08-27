@@ -477,7 +477,12 @@ func (command leaveCommand) Handle(bot *say.Bot, interaction *discordgo.Interact
 				break
 			}
 
-			if err := session.Connection.Disconnect(); err != nil {
+			command.Lock()
+			delete(command.Sessions, interaction.GuildID)
+			err = session.Connection.Disconnect()
+			command.Unlock()
+
+			if err != nil {
 				bot.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
 					Type: discordgo.InteractionResponseChannelMessageWithSource,
 					Data: &discordgo.InteractionResponseData{
