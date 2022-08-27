@@ -42,8 +42,8 @@ type voiceModule struct {
 }
 
 type voiceSession struct {
-	*voiceModule
 	*sync.Mutex
+	Module     *voiceModule
 	Connection *discordgo.VoiceConnection
 	Alive      chan<- bool
 }
@@ -127,6 +127,16 @@ func Install(bot *say.Bot) error {
 		}
 	})
 
+	mod.Bot.AddHandler(func(_ *discordgo.Session, voiceState *discordgo.VoiceStateUpdate) {
+		if voiceState.UserID != bot.State.User.ID {
+			return
+		}
+
+		if session, ok := mod.Sessions[voiceState.GuildID]; ok {
+			session.Close()
+		}
+	})
+
 	return nil
 }
 
@@ -190,10 +200,10 @@ func (mod voiceModule) GetSession(guildID string, channelID string) (*voiceSessi
 
 	alive := make(chan bool)
 	session = &voiceSession{
-		voiceModule: &mod,
-		Mutex:       new(sync.Mutex),
-		Connection:  connection,
-		Alive:       alive,
+		Module:     &mod,
+		Mutex:      new(sync.Mutex),
+		Connection: connection,
+		Alive:      alive,
 	}
 
 	go func() {
@@ -202,10 +212,7 @@ func (mod voiceModule) GetSession(guildID string, channelID string) (*voiceSessi
 			select {
 			case <-alive:
 			case <-time.After(idleTimeout):
-				mod.Lock()
-				delete(mod.Sessions, guildID)
-				session.Connection.Disconnect()
-				mod.Unlock()
+				session.Close()
 				break out
 			}
 		}
@@ -225,7 +232,7 @@ func (session voiceSession) SayMessage(message string, settings *say.User) error
 	engine := "standard"
 	outputFormat := "ogg_vorbis"
 
-	out, err := session.Polly.SynthesizeSpeech(&polly.SynthesizeSpeechInput{
+	out, err := session.Module.Polly.SynthesizeSpeech(&polly.SynthesizeSpeechInput{
 		Engine:       &engine,
 		OutputFormat: &outputFormat,
 		Text:         &message,
@@ -276,7 +283,7 @@ func (session voiceSession) SayMessage(message string, settings *say.User) error
 			return fmt.Errorf("couldn't read raw audio: %w", err)
 		}
 
-		opus, err := session.OpusEncoder.Encode(pcm, audioOpusFrameSize, audioOpusMaxBytes)
+		opus, err := session.Module.OpusEncoder.Encode(pcm, audioOpusFrameSize, audioOpusMaxBytes)
 		if err != nil {
 			return fmt.Errorf("couldn't encode raw audio: %w", err)
 		}
@@ -284,6 +291,14 @@ func (session voiceSession) SayMessage(message string, settings *say.User) error
 		session.Connection.OpusSend <- opus
 		session.Alive <- true
 	}
+}
+
+func (session voiceSession) Close() {
+	session.Lock()
+	defer session.Unlock()
+
+	delete(session.Module.Sessions, session.Connection.GuildID)
+	session.Connection.Disconnect()
 }
 
 type voiceCommand struct {
@@ -477,10 +492,7 @@ func (command leaveCommand) Handle(bot *say.Bot, interaction *discordgo.Interact
 				break
 			}
 
-			command.Lock()
-			delete(command.Sessions, interaction.GuildID)
-			err = session.Connection.Disconnect()
-			command.Unlock()
+			session.Close()
 
 			if err != nil {
 				bot.InteractionRespond(interaction.Interaction, &discordgo.InteractionResponse{
