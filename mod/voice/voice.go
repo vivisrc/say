@@ -66,11 +66,9 @@ func Install(bot *say.Bot) error {
 	mod.Bot.InstallCommand(voiceCommand{
 		voiceModule: mod,
 	})
-
 	mod.Bot.InstallCommand(prefixCommand{
 		voiceModule: mod,
 	})
-
 	mod.Bot.InstallCommand(leaveCommand{
 		voiceModule: mod,
 	})
@@ -112,8 +110,7 @@ func Install(bot *say.Bot) error {
 		}
 
 		content := strings.TrimSpace(message.Content[len(settings.Prefix):])
-		err = mod.HandleSay(content, settings, message.GuildID, message.Author.ID)
-		if err != nil {
+		if err = mod.HandleSay(content, settings, message.GuildID, message.Author.ID); err != nil {
 			bot.ChannelMessageSendComplex(message.ChannelID, &discordgo.MessageSend{
 				Content: err.Error(),
 				AllowedMentions: &discordgo.MessageAllowedMentions{
@@ -140,13 +137,7 @@ func Install(bot *say.Bot) error {
 	return nil
 }
 
-func InstallMinimal(bot *say.Bot) {
-	bot.InstallCommand(voiceCommand{})
-	bot.InstallCommand(prefixCommand{})
-	bot.InstallCommand(leaveCommand{})
-}
-
-func (mod voiceModule) HandleSay(content string, settings *say.User, guildID string, userID string) error {
+func (mod voiceModule) HandleSay(content string, user *say.User, guildID string, userID string) error {
 	guild, err := mod.Bot.State.Guild(guildID)
 	if err != nil {
 		return err
@@ -162,7 +153,7 @@ func (mod voiceModule) HandleSay(content string, settings *say.User, guildID str
 			session.Lock()
 			defer session.Unlock()
 
-			if err := session.SayMessage(content, settings); err != nil {
+			if err := session.SayMessage(content, user); err != nil {
 				return fmt.Errorf("internal error: %w", err)
 			}
 
@@ -193,6 +184,7 @@ func (mod voiceModule) GetSession(guildID string, channelID string) (*voiceSessi
 	if !ok {
 		new, err := mod.Bot.ChannelVoiceJoin(guildID, channelID, false, true)
 		if err != nil {
+			go new.Disconnect()
 			return nil, err
 		}
 		connection = new
@@ -200,20 +192,19 @@ func (mod voiceModule) GetSession(guildID string, channelID string) (*voiceSessi
 
 	alive := make(chan bool)
 	session = &voiceSession{
-		Module:     &mod,
 		Mutex:      new(sync.Mutex),
+		Module:     &mod,
 		Connection: connection,
 		Alive:      alive,
 	}
 
 	go func() {
-	out:
 		for {
 			select {
 			case <-alive:
 			case <-time.After(idleTimeout):
 				session.Close()
-				break out
+				return
 			}
 		}
 	}()
@@ -223,7 +214,7 @@ func (mod voiceModule) GetSession(guildID string, channelID string) (*voiceSessi
 	return session, nil
 }
 
-func (session voiceSession) SayMessage(message string, settings *say.User) error {
+func (session voiceSession) SayMessage(message string, user *say.User) error {
 	textType := "text"
 	if strings.Contains(message, "<speak>") {
 		textType = "ssml"
@@ -237,8 +228,8 @@ func (session voiceSession) SayMessage(message string, settings *say.User) error
 		OutputFormat: &outputFormat,
 		Text:         &message,
 		TextType:     &textType,
-		VoiceId:      &settings.Voice,
-		LanguageCode: &settings.VoiceLang,
+		VoiceId:      &user.Voice,
+		LanguageCode: &user.VoiceLang,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to synthesize speech: %w", err)
